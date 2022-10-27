@@ -9,13 +9,19 @@ import { isValidObjectId, Model } from 'mongoose';
 import { CreatePokemonDto } from './dto/create-pokemon.dto';
 import { UpdatePokemonDto } from './dto/update-pokemon.dto';
 import { Pokemon } from './entities/pokemon.entity';
+import { PaginationDto } from '../common/dto/pagination.dto';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class PokemonService {
+  private defaultLimit: number;
   constructor(
     @InjectModel(Pokemon.name)
     private readonly pokemonModel: Model<Pokemon>,
-  ) {}
+    private configService: ConfigService,
+  ) {
+    this.defaultLimit = configService.getOrThrow<number>('defaultLimit');
+  }
 
   async create(createPokemonDto: CreatePokemonDto) {
     createPokemonDto.name = createPokemonDto.name.toLowerCase();
@@ -28,8 +34,15 @@ export class PokemonService {
     }
   }
 
-  async findAll() {
-    const pokemons = await this.pokemonModel.find();
+  async findAll(paginationDto: PaginationDto) {
+    const { limit = this.defaultLimit, offset = 0 } = paginationDto;
+    const pokemons = await this.pokemonModel
+      .find()
+      .limit(limit)
+      .skip(offset)
+      .sort({ no: 'asc' })
+      .select('-__v');
+
     return pokemons;
   }
 
@@ -72,7 +85,7 @@ export class PokemonService {
     const { deletedCount } = await this.pokemonModel.deleteOne({ _id: id });
     if (deletedCount == 0)
       throw new BadRequestException(`Pokemon with id:${id} not exist`);
-    return;
+    // return;
   }
 
   private handleExceptions(error: any) {
@@ -86,5 +99,18 @@ export class PokemonService {
     throw new InternalServerErrorException(
       `The pokemon cannot be updated. Check server logs`,
     );
+  }
+
+  async fillPokemonsWithSeed(createPokemonDto: CreatePokemonDto[]) {
+    try {
+      await this.pokemonModel.deleteMany({});
+      createPokemonDto.forEach((poke, index) => {
+        createPokemonDto[index].name = poke.name.toLowerCase();
+      });
+      const pokemon = await this.pokemonModel.insertMany(createPokemonDto);
+      return pokemon;
+    } catch (err) {
+      this.handleExceptions(err);
+    }
   }
 }
